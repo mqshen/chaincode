@@ -1,0 +1,5 @@
+{
+"ca_certfiles":["cop/root.pem"],
+"client":{"keyfile":"cop/tls_client-key.pem",
+    "certfile":"cop/tls_client-cert.pem"}
+}
