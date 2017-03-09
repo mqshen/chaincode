@@ -148,17 +148,17 @@ func (t *InsuranceChaincode) issue(stub shim.ChaincodeStubInterface, args []stri
 		return nil, errors.New("Incorrect number of arguments. Expecting 2")
 	}
 
-	callerCertificate, err := stub.GetCallerCertificate()
-	if err != nil {
-		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
-	}
-	admin, err := stub.GetState(adminRole)
-	if err != nil {
-		return nil, fmt.Errorf("Failed getting admin certificate, [%v]", err)
-	}
-	if bytes.Compare(callerCertificate, admin) != 0 {
-		return nil, fmt.Errorf("the caller is not admin")
-	}
+	//callerCertificate, err := stub.GetCallerCertificate()
+	//if err != nil {
+	//	return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
+	//}
+	//admin, err := stub.GetState(adminRole)
+	//if err != nil {
+	//	return nil, fmt.Errorf("Failed getting admin certificate, [%v]", err)
+	//}
+	//if bytes.Compare(callerCertificate, admin) != 0 {
+	//	return nil, fmt.Errorf("the caller is not admin")
+	//}
 	company, err := base64.StdEncoding.DecodeString(args[0])
 	balance, err := strconv.Atoi(args[1])
 
