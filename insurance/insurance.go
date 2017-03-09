@@ -143,7 +143,7 @@ func (t *InsuranceChaincode) Invoke(stub shim.ChaincodeStubInterface, function s
 func (t *InsuranceChaincode) issue(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	fmt.Printf("start issue")
 	if len(args) != 2 {
-		return nil, errors.New("Incorrect number of arguments. Expecting 4")
+		return nil, errors.New("Incorrect number of arguments. Expecting 2")
 	}
 
 	callerCertificate, err := stub.GetCallerCertificate()
@@ -181,7 +181,7 @@ func (t *InsuranceChaincode) issue(stub shim.ChaincodeStubInterface, args []stri
 func (t *InsuranceChaincode) bank(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	fmt.Printf("start issue")
 	if len(args) != 2 {
-		return nil, errors.New("Incorrect number of arguments. Expecting 4")
+		return nil, errors.New("Incorrect number of arguments. Expecting 2")
 	}
 
 	callerCertificate, err := stub.GetCallerCertificate()
@@ -251,8 +251,8 @@ func isInsuranceOrBank(company []byte, stub shim.ChaincodeStubInterface, classif
 func (t *InsuranceChaincode) assign(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	fmt.Printf("start assign")
 
-	if len(args) != 4 {
-		return nil, errors.New("Incorrect number of arguments. Expecting 4")
+	if len(args) != 3 {
+		return nil, errors.New("Incorrect number of arguments. Expecting 3")
 	}
 	callerCertificate, err := stub.GetCallerCertificate()
 	if err != nil {
