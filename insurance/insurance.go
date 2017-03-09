@@ -9,14 +9,15 @@ import (
 	"encoding/base64"
 	"bytes"
 	"encoding/json"
+	"strings"
 )
 
 const (
-	insuranceTableColumn  = "InsuranceOwnership"
-	bankTableColumn  = "BankOwnership"
-	policyTableColumn  = "Policy"
-	creditTableColumn  = "Credit"
-	applyTableColumn  = "Apply"
+	insurancePrefix = "insurance_"
+	bankPrefix = "bank_"
+	userPrefix = "user_"
+	creditPrefix = "credit_"
+	applyPrefix = "apply_"
 	adminRole = "admin"
 )
 
@@ -24,9 +25,9 @@ type Credit struct {
 	Id      string 	 `json:"id,omitempty"`
 	Company string 	 `json:"company,omitempty"`
 	Bank 	string 	 `json:"bank,omitempty"`
-	Expire  int32	 `json:"expire,omitempty"`
-	Credit	int32	 `json:"credit,omitempty"`
-	Rate    int32	 `json:"rate,omitempty"`
+	Expire  int	 `json:"expire,omitempty"`
+	Credit	int	 `json:"credit,omitempty"`
+	Rate    int	 `json:"rate,omitempty"`
 }
 
 type Apply struct {
@@ -39,13 +40,15 @@ type Policy struct {
 	Owner   string   `json:"owner,omitempty"`
 	Id      string 	 `json:"id,omitempty"`
 	Company string 	 `json:"company,omitempty"`
-	State   int32	 `json:"state,omitempty"`
-	Balance int32	 `json:"balance,omitempty"`
-	Credits []Credit `json:"credits"`
-	Applied *Apply   `json:"applied"`
+	State   int	 `json:"state,omitempty"`
+	Balance int	 `json:"balance,omitempty"`
 }
 
-
+type PolicyResult struct {
+	Insurance Policy   `json:"insurance,omitempty"`
+	Credits   []Credit `json:"credits,omitempty"`
+	Applied   *Apply   `json:"Applied,omitempty"`
+}
 
 // SimpleChaincode example simple Chaincode implementation
 type InsuranceChaincode struct {
@@ -61,59 +64,6 @@ func (t *InsuranceChaincode) Init(stub shim.ChaincodeStubInterface, function str
 	}
 	if len(admin) == 0 {
 		return nil, errors.New("Invalid call asset role. Empty.")
-	}
-
-	// Create ownership table
-	err = stub.CreateTable(insuranceTableColumn, []*shim.ColumnDefinition{
-		&shim.ColumnDefinition{Name: "Company", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "Balance", Type: shim.ColumnDefinition_INT32, Key: false},
-	})
-	if err != nil {
-		return nil, errors.New("Failed creating InsuranceOwnership table.")
-	}
-
-	err = stub.CreateTable(bankTableColumn, []*shim.ColumnDefinition{
-		&shim.ColumnDefinition{Name: "Bank", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "Balance", Type: shim.ColumnDefinition_INT32, Key: false},
-	})
-	if err != nil {
-		return nil, errors.New("Failed creating BankOwnership table.")
-	}
-
-	// Create assets issue table
-	err = stub.CreateTable(policyTableColumn, []*shim.ColumnDefinition{
-		&shim.ColumnDefinition{Name: "Owner", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "Id", Type: shim.ColumnDefinition_STRING, Key: true},
-		&shim.ColumnDefinition{Name: "Company", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "State", Type: shim.ColumnDefinition_INT32, Key: false},
-		&shim.ColumnDefinition{Name: "Balance", Type: shim.ColumnDefinition_INT32, Key: false},
-	})
-	if err != nil {
-		return nil, errors.New("Failed creating Policy table.")
-	}
-
-
-	// Create assets issue table
-	err = stub.CreateTable(creditTableColumn, []*shim.ColumnDefinition{
-		&shim.ColumnDefinition{Name: "Id", Type: shim.ColumnDefinition_STRING, Key: true},
-		&shim.ColumnDefinition{Name: "Company", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "Bank", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "Expire", Type: shim.ColumnDefinition_INT32, Key: false},
-		&shim.ColumnDefinition{Name: "Credit", Type: shim.ColumnDefinition_INT32, Key: false},
-		&shim.ColumnDefinition{Name: "Rate", Type: shim.ColumnDefinition_INT32, Key: false},
-	})
-	if err != nil {
-		return nil, errors.New("Failed creating credit table.")
-	}
-
-	// Create assets issue table
-	err = stub.CreateTable(applyTableColumn, []*shim.ColumnDefinition{
-		&shim.ColumnDefinition{Name: "Id", Type: shim.ColumnDefinition_STRING, Key: true},
-		&shim.ColumnDefinition{Name: "Company", Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name: "Bank", Type: shim.ColumnDefinition_BYTES, Key: false},
-	})
-	if err != nil {
-		return nil, errors.New("Failed creating credit table.")
 	}
 
 	stub.PutState(adminRole, admin)
@@ -148,27 +98,20 @@ func (t *InsuranceChaincode) issue(stub shim.ChaincodeStubInterface, args []stri
 		return nil, errors.New("Incorrect number of arguments. Expecting 2")
 	}
 
-	//callerCertificate, err := stub.GetCallerCertificate()
-	//if err != nil {
-	//	return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
-	//}
-	//admin, err := stub.GetState(adminRole)
-	//if err != nil {
-	//	return nil, fmt.Errorf("Failed getting admin certificate, [%v]", err)
-	//}
-	//if bytes.Compare(callerCertificate, admin) != 0 {
-	//	return nil, fmt.Errorf("the caller is not admin")
-	//}
-	company, err := base64.StdEncoding.DecodeString(args[0])
-	//balance, err := strconv.Atoi(args[1])
+	callerCertificate, err := stub.GetCallerCertificate()
+	if err != nil {
+		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
+	}
+	admin, err := stub.GetState(adminRole)
+	if err != nil {
+		return nil, fmt.Errorf("Failed getting admin certificate, [%v]", err)
+	}
+	if bytes.Compare(callerCertificate, admin) != 0 {
+		return nil, fmt.Errorf("the caller is not admin")
+	}
 
-	fmt.Printf("issue for company: [%x]", company)
-	//if isInsuranceOrBank(company, stub, 0) {
-	//	return nil, fmt.Errorf("Failed this company is alreay issue insurance", err)
-	//}
-	key := "issue" + args[0]
-	balance, err := stub.GetState(key)
-	if err != nil || balance != nil {
+	key := insurancePrefix + args[0]
+	if isInsuranceOrBank(key, stub) {
 		return nil, fmt.Errorf("Failed this company is alreay issue insurance", err)
 	}
 
@@ -198,19 +141,14 @@ func (t *InsuranceChaincode) bank(stub shim.ChaincodeStubInterface, args []strin
 		return nil, fmt.Errorf("the caller is not admin")
 	}
 	company, err := base64.StdEncoding.DecodeString(args[0])
-	balance, err := strconv.Atoi(args[1])
 
-	if isInsuranceOrBank(company, stub, 1) {
-		return nil, fmt.Errorf("Failed this bank is alreay apply", err)
+	fmt.Printf("issue for company: [%x]", company)
+	key := bankPrefix + args[0]
+	if isInsuranceOrBank(key, stub) {
+		return nil, fmt.Errorf("Failed this company is alreay issue insurance", err)
 	}
 
-	_, err = stub.InsertRow(
-		bankTableColumn,
-		shim.Row{
-			Columns: []*shim.Column{
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: company}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: int32(balance)}}},
-		})
+	stub.PutState(key, []byte(args[1]))
 	if err != nil {
 		return nil, fmt.Errorf("the caller is not admin, [%v]", err)
 	}
@@ -218,36 +156,14 @@ func (t *InsuranceChaincode) bank(stub shim.ChaincodeStubInterface, args []strin
 	return nil, nil
 }
 
-func isInsuranceOrBank(company []byte, stub shim.ChaincodeStubInterface, classify int) (bool) {
-	var columns []shim.Column
-	col1 := shim.Column{Value: &shim.Column_Bytes{Bytes: company}}
-	columns = append(columns, col1)
+func isInsuranceOrBank(key string, stub shim.ChaincodeStubInterface) (bool) {
+	balance, err := stub.GetState(key)
 
-	tableName := insuranceTableColumn
-	if classify != 0 {
-		tableName = bankTableColumn
-	}
-
-	rowChannel, err := stub.GetRows(tableName, columns)
-	if err != nil {
+	if err != nil || balance != nil {
 		return false
 	}
-	var allRows []shim.Row
 
-	for {
-		select {
-		case row, ok := <-rowChannel:
-			if !ok {
-				rowChannel = nil
-			} else {
-				allRows = append(allRows, row)
-			}
-		}
-		if rowChannel == nil {
-			break
-		}
-	}
-	return len(allRows) > 0
+	return true
 }
 
 func (t *InsuranceChaincode) assign(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
@@ -260,25 +176,38 @@ func (t *InsuranceChaincode) assign(stub shim.ChaincodeStubInterface, args []str
 	if err != nil {
 		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
-	if !isInsuranceOrBank(callerCertificate, stub, 0) {
+	company := base64.StdEncoding.EncodeToString(callerCertificate)
+	if !isInsuranceOrBank(company, stub) {
 		return nil, fmt.Errorf("caller is not insurance company, [%x]", callerCertificate)
 	}
-	owner, err := base64.StdEncoding.DecodeString(args[0])
+	owner := args[0]
 	id := args[1]
 	balance, err := strconv.Atoi(args[2])
+	key := userPrefix + owner
 
-	_, err = stub.InsertRow(
-		insuranceTableColumn,
-		shim.Row{
-			Columns: []*shim.Column{
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: owner}},
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(id)}},
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: callerCertificate}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: 0}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: int32(balance)}}},
-		})
+	policy := Policy{owner, id, company, 0, balance}
+
+	var policies []Policy
+	userAssetString, err := stub.GetState(key)
+	if err != nil || userAssetString == nil {
+		policies = []Policy{policy}
+	} else {
+		err = json.Unmarshal(userAssetString, &policies)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
+		}
+		policies = append(policies, policy)
+	}
+
+	userAssetResult, err := json.Marshal(policies)
 	if err != nil {
-		return nil, errors.New("Failed assign insurance")
+		return nil, fmt.Errorf("marshal user's asset failed")
+	}
+
+	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
+	err = stub.PutState(key, userAssetResult)
+	if err != nil {
+		return nil, fmt.Errorf("store user's asset failed")
 	}
 	return nil, nil
 }
@@ -293,29 +222,46 @@ func (t *InsuranceChaincode) credit(stub shim.ChaincodeStubInterface, args []str
 	if err != nil {
 		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
-	if !isInsuranceOrBank(callerCertificate, stub, 1) {
+	bankId := base64.StdEncoding.EncodeToString(callerCertificate)
+	key := bankPrefix + bankId
+	if !isInsuranceOrBank(key, stub) {
 		return nil, errors.New("caller is not bank")
 	}
-	company, err := base64.StdEncoding.DecodeString(args[0])
+	company := args[0]
 	id := args[1]
 	expire, err := strconv.Atoi(args[2])
-	credit, err := strconv.Atoi(args[3])
+	limit, err := strconv.Atoi(args[3])
 	rate, err := strconv.Atoi(args[4])
+	credit := Credit{id, company, bankId, expire, limit, rate}
 
-	_, err = stub.InsertRow(
-		creditTableColumn,
-		shim.Row{
-			Columns: []*shim.Column{
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(id)}},
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: company}},
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: callerCertificate}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: int32(expire)}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: int32(credit)}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: int32(rate)}}},
-		})
-	if err != nil {
-		return nil, errors.New("Failed credit")
+	insuranceId := creditPrefix + company + id
+	var credits []Credit
+	userAssetString, err := stub.GetState(insuranceId)
+	if err != nil || userAssetString == nil {
+		credits = []Credit{credit}
+	} else {
+		err = json.Unmarshal(userAssetString, &credits)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
+		}
+		for _, c := range credits {
+			if strings.Compare(c.Bank, bankId) == 0 {
+				return nil, fmt.Errorf("already credit this insurance")
+			}
+		}
+		credits = append(credits, credit)
 	}
+	userAssetResult, err := json.Marshal(credits)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user's asset failed")
+	}
+
+	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
+	err = stub.PutState(key, userAssetResult)
+	if err != nil {
+		return nil, fmt.Errorf("store user's asset failed")
+	}
+
 	return nil, nil
 }
 
@@ -326,56 +272,54 @@ func (t *InsuranceChaincode) apply(stub shim.ChaincodeStubInterface, args []stri
 		return nil, errors.New("Incorrect number of arguments. Expecting 3")
 	}
 	owner, err := stub.GetCallerCertificate()
-	company, err := base64.StdEncoding.DecodeString(args[0])
-	id := args[1]
-	bank, err := base64.StdEncoding.DecodeString(args[2])
-
-
-	var columns []shim.Column
-	col1 := shim.Column{Value: &shim.Column_Bytes{Bytes: owner}}
-	columns = append(columns, col1)
-
-	col2 := shim.Column{Value: &shim.Column_String_{String_: id}}
-	columns = append(columns, col2)
-
-	col3 := shim.Column{Value: &shim.Column_Bytes{Bytes: company}}
-	columns = append(columns, col3)
-
-
-	rowChannel, err := stub.GetRows(policyTableColumn, columns)
 	if err != nil {
-		return nil, errors.New("failed to query policy")
+		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
-	var allRows []shim.Row
+	user := base64.StdEncoding.EncodeToString(owner)
+	company := args[0]
+	id := args[1]
+	bank := args[2]
 
-	for {
-		select {
-		case row, ok := <-rowChannel:
-			if !ok {
-				rowChannel = nil
-			} else {
-				allRows = append(allRows, row)
+	key := userPrefix + user
+
+	var policies []Policy
+	userAssetString, err := stub.GetState(key)
+	if err != nil || userAssetString == nil {
+		return nil, fmt.Errorf("user did not have this insurance")
+	} else {
+		err = json.Unmarshal(userAssetString, &policies)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
+		}
+		flag := false
+		for _, p := range policies {
+			if strings.Compare(p.Company, company) == 0 && strings.Compare(p.Id, id) == 0{
+				flag = true
+				break
 			}
 		}
-		if rowChannel == nil {
-			break
+		if !flag {
+			return nil, fmt.Errorf("user did not have this insurance")
 		}
 	}
-	if len(allRows) == 0 {
-		return nil, fmt.Errorf("Failed getting user's issurance: %s", id)
+
+	applyId := applyPrefix + company + id
+	applyString, err := stub.GetState(applyId)
+	if err != nil || applyString != nil {
+		return nil, fmt.Errorf("this insurance is already apply")
+	}
+	apply := Apply{id, company, bank}
+	userAssetResult, err := json.Marshal(apply)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user's asset failed")
 	}
 
-	_, err = stub.InsertRow(
-		applyTableColumn,
-		shim.Row{
-			Columns: []*shim.Column{
-				&shim.Column{Value: &shim.Column_String_{String_: id}},
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: company}},
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: bank}}},
-		})
+	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
+	err = stub.PutState(key, userAssetResult)
 	if err != nil {
-		return nil, errors.New("Failed apply")
+		return nil, fmt.Errorf("store user's asset failed")
 	}
+
 	return nil, nil
 }
 
@@ -391,115 +335,70 @@ func (t *InsuranceChaincode) Query(stub shim.ChaincodeStubInterface, function st
 	return nil, nil
 }
 
-func queryBank(stub shim.ChaincodeStubInterface, id string, company []byte) ([]Credit, error) {
-	var columns []shim.Column
-	col1 := shim.Column{Value: &shim.Column_String_{String_: id}}
-	columns = append(columns, col1)
-	col2 := shim.Column{Value: &shim.Column_Bytes{Bytes: company}}
-	columns = append(columns, col2)
-
-	rowChannel, err := stub.GetRows(creditTableColumn, columns)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to queyr credit table ")
-	}
-
+func queryBank(stub shim.ChaincodeStubInterface, id , company string) ([]Credit, error) {
+	insuranceId := creditPrefix + company + id
 	var credits []Credit
-	for {
-		select {
-		case row, ok := <-rowChannel:
-			if !ok {
-				rowChannel = nil
-			} else {
-				bank := row.Columns[3].GetString_()
-				expire := row.Columns[4].GetInt32()
-				limit := row.Columns[5].GetInt32()
-				rate := row.Columns[6].GetInt32()
-				credit := Credit{id, string(company), bank, expire, limit, rate}
-				credits = append(credits, credit)
-			}
-		}
-		if rowChannel == nil {
-			break
+	userAssetString, err := stub.GetState(insuranceId)
+	if err != nil || userAssetString == nil {
+		return credits, nil
+	} else {
+		err = json.Unmarshal(userAssetString, &credits)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
 		}
 	}
 	return credits, nil
 }
 
-func queryApply(stub shim.ChaincodeStubInterface, id string, company []byte) (*Apply, error) {
-	var columns []shim.Column
-	col1 := shim.Column{Value: &shim.Column_String_{String_: id}}
-	columns = append(columns, col1)
-	col2 := shim.Column{Value: &shim.Column_Bytes{Bytes: company}}
-	columns = append(columns, col2)
-
-	rowChannel, err := stub.GetRows(applyTableColumn, columns)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to queyr credit table ")
-	}
-
-	var apply *Apply
-	for {
-		select {
-		case row, ok := <-rowChannel:
-			if !ok {
-				rowChannel = nil
-			} else {
-				bank := row.Columns[3].GetString_()
-				apply = &Apply{id, string(company), bank}
-				break
-			}
-		}
-		if rowChannel == nil {
-			break
+func queryApply(stub shim.ChaincodeStubInterface, id, company string) (*Apply, error) {
+	insuranceId := applyPrefix + company + id
+	var apply Apply
+	userAssetString, err := stub.GetState(insuranceId)
+	if err != nil || userAssetString == nil {
+		return nil, nil
+	} else {
+		err = json.Unmarshal(userAssetString, &apply)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
 		}
 	}
-	return apply, nil
+	return &apply, nil
 }
 
 func (t *InsuranceChaincode) queryUser(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("Incorrect number of arguments. Expecting name of an asset to query 1")
 	}
-	owner, err := base64.StdEncoding.DecodeString(args[0])
-	if err != nil {
-		return nil, fmt.Errorf("Failed decoding owner")
-	}
-	var columns []shim.Column
-	col1 := shim.Column{Value: &shim.Column_Bytes{Bytes: owner}}
-	columns = append(columns, col1)
-	rowChannel, err := stub.GetRows(policyTableColumn, columns)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to query user")
-	}
-	var polices []Policy
+	owner := args[0]
+	key := userPrefix + owner
 
-	for {
-		select {
-		case row, ok := <-rowChannel:
-			if !ok {
-				rowChannel = nil
-			} else {
-				id := row.Columns[1].GetString_()
-				company := row.Columns[2].GetBytes()
-				state := row.Columns[3].GetInt32()
-				balance := row.Columns[3].GetInt32()
-				credits, err := queryBank(stub, id, company)
-				if err != nil {
-					return nil, fmt.Errorf("Failed query credit")
-				}
-				apply, err := queryApply(stub, id, company)
-				if err != nil {
-					return nil, fmt.Errorf("Failed query apply")
-				}
-				policy := Policy{string(owner), id, string(company), state, balance, credits, apply}
-				polices = append(polices, policy)
-			}
+	var policies []Policy
+	var issurances []PolicyResult
+	userAssetString, err := stub.GetState(key)
+	if err != nil || userAssetString == nil {
+		return nil, nil
+	} else {
+		err = json.Unmarshal(userAssetString, &policies)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
 		}
-		if rowChannel == nil {
-			break
+		for _, p := range policies {
+			credits, error := queryBank(stub, p.Id, p.Company)
+			if error != nil {
+				return nil, fmt.Errorf("query credit failed" + err.Error())
+			}
+			apply, error := queryApply(stub, p.Id, p.Company)
+			if error != nil {
+				return nil, fmt.Errorf("query credit apply" + err.Error())
+			}
+			result := PolicyResult{p, credits, apply}
+			issurances = append(issurances, result)
 		}
 	}
-	jSONasBytes, _ := json.Marshal(polices)
+	jSONasBytes, err := json.Marshal(issurances)
+	if err != nil || userAssetString == nil {
+		return nil, fmt.Errorf("failed marshal issurance" + err.Error())
+	}
 	return jSONasBytes, nil
 }
 
