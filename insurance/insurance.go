@@ -175,7 +175,8 @@ func (t *InsuranceChaincode) assign(stub shim.ChaincodeStubInterface, args []str
 		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
 	company := base64.StdEncoding.EncodeToString(callerCertificate)
-	if !isInsuranceOrBank(company, stub) {
+	insuranceKey := insurancePrefix + company
+	if !isInsuranceOrBank(insuranceKey, stub) {
 		return nil, fmt.Errorf("caller is not insurance company, [%x]", callerCertificate)
 	}
 	owner := args[0]
