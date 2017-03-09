@@ -255,8 +255,8 @@ func (t *InsuranceChaincode) credit(stub shim.ChaincodeStubInterface, args []str
 		return nil, fmt.Errorf("marshal user's asset failed")
 	}
 
-	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
-	err = stub.PutState(key, userAssetResult)
+	fmt.Println("set key: %s , detail: %s", insuranceId, string(userAssetResult))
+	err = stub.PutState(insuranceId, userAssetResult)
 	if err != nil {
 		return nil, fmt.Errorf("store user's asset failed")
 	}
@@ -313,8 +313,8 @@ func (t *InsuranceChaincode) apply(stub shim.ChaincodeStubInterface, args []stri
 		return nil, fmt.Errorf("marshal user's asset failed")
 	}
 
-	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
-	err = stub.PutState(key, userAssetResult)
+	fmt.Println("set key: %s , detail: %s", applyId, string(userAssetResult))
+	err = stub.PutState(applyId, userAssetResult)
 	if err != nil {
 		return nil, fmt.Errorf("store user's asset failed")
 	}
