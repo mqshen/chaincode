@@ -160,6 +160,7 @@ func (t *InsuranceChaincode) issue(stub shim.ChaincodeStubInterface, args []stri
 	company, err := base64.StdEncoding.DecodeString(args[0])
 	balance, err := strconv.Atoi(args[1])
 
+	fmt.Printf("issue for company: [%x]", company)
 	if isInsuranceOrBank(company, stub, 0) {
 		return nil, fmt.Errorf("Failed this company is alreay issue insurance", err)
 	}
@@ -259,7 +260,7 @@ func (t *InsuranceChaincode) assign(stub shim.ChaincodeStubInterface, args []str
 		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
 	if !isInsuranceOrBank(callerCertificate, stub, 0) {
-		return nil, errors.New("caller is not insurance company")
+		return nil, fmt.Errorf("caller is not insurance company, [%x]", callerCertificate)
 	}
 	owner, err := base64.StdEncoding.DecodeString(args[0])
 	id := args[1]
@@ -292,7 +293,7 @@ func (t *InsuranceChaincode) credit(stub shim.ChaincodeStubInterface, args []str
 		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
 	if !isInsuranceOrBank(callerCertificate, stub, 1) {
-		return nil, errors.New("caller is not insurance company")
+		return nil, errors.New("caller is not bank")
 	}
 	company, err := base64.StdEncoding.DecodeString(args[0])
 	id := args[1]
