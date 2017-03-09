@@ -158,11 +158,9 @@ func (t *InsuranceChaincode) bank(stub shim.ChaincodeStubInterface, args []strin
 
 func isInsuranceOrBank(key string, stub shim.ChaincodeStubInterface) (bool) {
 	balance, err := stub.GetState(key)
-
-	if err != nil || balance != nil {
+	if err != nil || balance == nil {
 		return false
 	}
-
 	return true
 }
 
