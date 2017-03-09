@@ -52,14 +52,16 @@ type InsuranceChaincode struct {
 }
 
 func (t *InsuranceChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	callerCertificate, err := stub.GetCallerCertificate()
+	if len(args) != 1 {
+		return nil, errors.New("Incorrect number of arguments. Expecting 1")
+	}
+	admin, err := base64.StdEncoding.DecodeString(args[0])
 	if err != nil {
 		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
 	}
-	if len(callerCertificate) == 0 {
+	if len(admin) == 0 {
 		return nil, errors.New("Invalid call asset role. Empty.")
 	}
-
 
 	// Create ownership table
 	err = stub.CreateTable(insuranceTableColumn, []*shim.ColumnDefinition{
@@ -114,7 +116,7 @@ func (t *InsuranceChaincode) Init(stub shim.ChaincodeStubInterface, function str
 		return nil, errors.New("Failed creating credit table.")
 	}
 
-	stub.PutState(adminRole, callerCertificate)
+	stub.PutState(adminRole, admin)
 	return nil, nil
 }
 
