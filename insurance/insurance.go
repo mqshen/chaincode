@@ -160,20 +160,19 @@ func (t *InsuranceChaincode) issue(stub shim.ChaincodeStubInterface, args []stri
 	//	return nil, fmt.Errorf("the caller is not admin")
 	//}
 	company, err := base64.StdEncoding.DecodeString(args[0])
-	balance, err := strconv.Atoi(args[1])
+	//balance, err := strconv.Atoi(args[1])
 
 	fmt.Printf("issue for company: [%x]", company)
-	if isInsuranceOrBank(company, stub, 0) {
+	//if isInsuranceOrBank(company, stub, 0) {
+	//	return nil, fmt.Errorf("Failed this company is alreay issue insurance", err)
+	//}
+	key := "issue" + args[0]
+	balance, err := stub.GetState(key)
+	if err != nil || balance != nil {
 		return nil, fmt.Errorf("Failed this company is alreay issue insurance", err)
 	}
 
-	_, err = stub.InsertRow(
-		insuranceTableColumn,
-		shim.Row{
-			Columns: []*shim.Column{
-				&shim.Column{Value: &shim.Column_Bytes{Bytes: company}},
-				&shim.Column{Value: &shim.Column_Int32{Int32: int32(balance)}}},
-		})
+	stub.PutState(key, []byte(args[1]))
 	if err != nil {
 		return nil, fmt.Errorf("the caller is not admin, [%v]", err)
 	}
