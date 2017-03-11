@@ -18,6 +18,10 @@ const (
 	userPrefix = "user_"
 	creditPrefix = "credit_"
 	applyPrefix = "apply_"
+	loanPrefix = "loan_"
+	payPrefix = "pay_"
+	breakPrefix = "break_"
+	confirmPrefix = "confirm_"
 	adminRole = "admin"
 )
 
@@ -48,6 +52,10 @@ type PolicyResult struct {
 	Insurance Policy   `json:"insurance,omitempty"`
 	Credits   []Credit `json:"credits,omitempty"`
 	Applied   *Apply   `json:"Applied,omitempty"`
+	Loan      *Apply   `json:"loan,omitempty"`
+	Pay       *Apply   `json:"pay,omitempty"`
+	IsBreak   *Apply   `json:"isBreak,omitempty"`
+	Confirm   *Apply   `json:"confirm,omitempty"`
 }
 
 // SimpleChaincode example simple Chaincode implementation
@@ -87,6 +95,18 @@ func (t *InsuranceChaincode) Invoke(stub shim.ChaincodeStubInterface, function s
 	} else if function == "apply" {
 		// Transfer ownership
 		return t.apply(stub, args)
+	} else if function == "loan" {
+		// Transfer ownership
+		return t.loan(stub, args, 0)
+	} else if function == "pay" {
+		// Transfer ownership
+		return t.loan(stub, args, 1)
+	} else if function == "break" {
+		// Transfer ownership
+		return t.loan(stub, args, 2)
+	} else if function == "confirm" {
+		// Transfer ownership
+		return t.loan(stub, args, 3)
 	}
 
 	return nil, errors.New("Received unknown function invocation")
@@ -322,6 +342,73 @@ func (t *InsuranceChaincode) apply(stub shim.ChaincodeStubInterface, args []stri
 	return nil, nil
 }
 
+func (t *InsuranceChaincode) loan(stub shim.ChaincodeStubInterface, args []string, actionType int) ([]byte, error) {
+	fmt.Printf("start assign")
+
+	if len(args) != 3 {
+		return nil, errors.New("Incorrect number of arguments. Expecting 3")
+	}
+	owner, err := stub.GetCallerCertificate()
+	if err != nil {
+		return nil, fmt.Errorf("Failed getting call certificate, [%v]", err)
+	}
+	user := base64.StdEncoding.EncodeToString(owner)
+	company := args[0]
+	id := args[1]
+	bank := args[2]
+
+	key := userPrefix + user
+
+	var policies []Policy
+	userAssetString, err := stub.GetState(key)
+	if err != nil || userAssetString == nil {
+		return nil, fmt.Errorf("user did not have any insurance")
+	} else {
+		err = json.Unmarshal(userAssetString, &policies)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
+		}
+		flag := false
+		for _, p := range policies {
+			if strings.Compare(p.Company, company) == 0 && strings.Compare(p.Id, id) == 0{
+				flag = true
+				break
+			}
+		}
+		if !flag {
+			return nil, fmt.Errorf("user did not have this insurance, %s, %s", company, id)
+		}
+	}
+	keyPrefix := loanPrefix
+	switch actionType {
+	case 1 :
+		keyPrefix = payPrefix
+	case 2 :
+		keyPrefix = breakPrefix
+	case 3 :
+		keyPrefix = confirmPrefix
+	}
+
+	applyId := keyPrefix + company + id
+	applyString, err := stub.GetState(applyId)
+	if err != nil || applyString != nil {
+		return nil, fmt.Errorf("this insurance is already apply")
+	}
+	apply := Apply{id, company, bank}
+	userAssetResult, err := json.Marshal(apply)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user's asset failed")
+	}
+
+	fmt.Println("set key: %s , detail: %s", applyId, string(userAssetResult))
+	err = stub.PutState(applyId, userAssetResult)
+	if err != nil {
+		return nil, fmt.Errorf("store user's asset failed")
+	}
+
+	return nil, nil
+}
+
 // Query callback representing the query of a chaincode
 func (t *InsuranceChaincode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	if function == "user" {
@@ -364,6 +451,31 @@ func queryApply(stub shim.ChaincodeStubInterface, id, company string) (*Apply, e
 	return &apply, nil
 }
 
+
+func queryByAction(stub shim.ChaincodeStubInterface, id, company string, actionType int) (*Apply, error) {
+	keyPrefix := loanPrefix
+	switch actionType {
+	case 1 :
+		keyPrefix = payPrefix
+	case 2 :
+		keyPrefix = breakPrefix
+	case 3 :
+		keyPrefix = confirmPrefix
+	}
+	insuranceId := keyPrefix + company + id
+	var apply Apply
+	userAssetString, err := stub.GetState(insuranceId)
+	if err != nil || userAssetString == nil {
+		return nil, nil
+	} else {
+		err = json.Unmarshal(userAssetString, &apply)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal user balance failed " + err.Error())
+		}
+	}
+	return &apply, nil
+}
+
 func (t *InsuranceChaincode) queryUser(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("Incorrect number of arguments. Expecting name of an asset to query 1")
@@ -390,7 +502,23 @@ func (t *InsuranceChaincode) queryUser(stub shim.ChaincodeStubInterface, args []
 			if error != nil {
 				return nil, fmt.Errorf("query credit apply" + err.Error())
 			}
-			result := PolicyResult{p, credits, apply}
+			loan, error := queryByAction(stub, p.Id, p.Company, 0)
+			if error != nil {
+				return nil, fmt.Errorf("query credit apply" + err.Error())
+			}
+			pay, error := queryByAction(stub, p.Id, p.Company, 1)
+			if error != nil {
+				return nil, fmt.Errorf("query credit apply" + err.Error())
+			}
+			isBreak, error := queryByAction(stub, p.Id, p.Company, 2)
+			if error != nil {
+				return nil, fmt.Errorf("query credit apply" + err.Error())
+			}
+			confirm, error := queryByAction(stub, p.Id, p.Company, 3)
+			if error != nil {
+				return nil, fmt.Errorf("query credit apply" + err.Error())
+			}
+			result := PolicyResult{p, credits, apply, loan, pay, isBreak, confirm}
 			issurances = append(issurances, result)
 		}
 	}
