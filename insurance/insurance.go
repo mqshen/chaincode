@@ -284,7 +284,7 @@ func (t *InsuranceChaincode) apply(stub shim.ChaincodeStubInterface, args []stri
 	var policies []Policy
 	userAssetString, err := stub.GetState(key)
 	if err != nil || userAssetString == nil {
-		return nil, fmt.Errorf("user did not have this insurance")
+		return nil, fmt.Errorf("user did not have any insurance")
 	} else {
 		err = json.Unmarshal(userAssetString, &policies)
 		if err != nil {
@@ -298,7 +298,7 @@ func (t *InsuranceChaincode) apply(stub shim.ChaincodeStubInterface, args []stri
 			}
 		}
 		if !flag {
-			return nil, fmt.Errorf("user did not have this insurance")
+			return nil, fmt.Errorf("user did not have this insurance, %s, %s", company, id)
 		}
 	}
 
