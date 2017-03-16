@@ -19,179 +19,571 @@ package main
 import (
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
+	pb "github.com/hyperledger/fabric/protos/peer"
+	"strconv"
+	"encoding/json"
+	"bytes"
+	"github.com/golang/protobuf/proto"
 )
 
-// SimpleChaincode example simple Chaincode implementation
-type SimpleChaincode struct {
-}
-var EVENT_COUNTER = "event_counter"
-func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	var A, B string    // Entities
-	var Aval, Bval int // Asset holdings
-	var err error
-
-	if len(args) != 4 {
-		return nil, errors.New("Incorrect number of arguments. Expecting 4")
-	}
-
-	// Initialize the chaincode
-	A = args[0]
-	Aval, err = strconv.Atoi(args[1])
-	if err != nil {
-		return nil, errors.New("Expecting integer value for asset holding")
-	}
-	B = args[2]
-	Bval, err = strconv.Atoi(args[3])
-	if err != nil {
-		return nil, errors.New("Expecting integer value for asset holding")
-	}
-	fmt.Printf("Aval = %d, Bval = %d\n", Aval, Bval)
-
-	// Write the state to the ledger
-	err = stub.PutState(A, []byte(strconv.Itoa(Aval)))
-	if err != nil {
-		return nil, err
-	}
-
-	err = stub.PutState(B, []byte(strconv.Itoa(Bval)))
-	if err != nil {
-		return nil, err
-	}
-	err = stub.PutState(EVENT_COUNTER, []byte("1"))
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
+type assetIssue struct {
+	Owner      string `json:"owner"`
+	Balance	   int    `json:"balance"`
+	Name       string `json:"name"`
 }
 
-// Transaction makes payment of X units from A to B
-func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	if function == "delete" {
-		// Deletes an entity from its state
-		return t.delete(stub, args)
+type UserAsset struct {
+	Expire     int    `json:"expire"`
+	Amount	   int    `json:"amount"`
+}
+
+// This struct represents an Identity
+// (with its MSP identifier) to be used
+// to serialize it and deserialize it
+type SerializedIdentity struct {
+	// The identifier of the associated membership service provider
+	Mspid string `protobuf:"bytes,1,opt,name=Mspid" json:"Mspid,omitempty"`
+	// the Identity, serialized according to the rules of its MPS
+	IdBytes []byte `protobuf:"bytes,2,opt,name=IdBytes,proto3" json:"IdBytes,omitempty"`
+}
+
+func (m *SerializedIdentity) Reset()                    { *m = SerializedIdentity{} }
+func (m *SerializedIdentity) String() string            { return proto.CompactTextString(m) }
+func (*SerializedIdentity) ProtoMessage()               {}
+
+// BonusManagementChaincode is simple chaincode implementing a basic Asset Management system
+// with access control enforcement at chaincode level.
+// Look here for more information on how to implement access control at chaincode level:
+// https://github.com/hyperledger/fabric/blob/master/docs/tech/application-ACL.md
+// An asset is simply represented by a string.
+type BonusManagementChaincode struct {
+}
+
+// Init method will be called during deployment.
+// The deploy transaction metadata is supposed to contain the administrator cert
+//func (t *BonusManagementChaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *BonusManagementChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response {
+	fmt.Println("Init Chaincode...")
+
+	// Set the role of the users that are allowed to assign assets
+	// The metadata will contain the role of the users that are allowed to assign assets
+	adminCert, err := stub.GetCreator()
+	if err != nil {
+		return shim.Error("Failed getting createor" + err.Error())
 	}
 
-	var A, B string    // Entities
-	var Aval, Bval int // Asset holdings
-	var X int          // Transaction value
-	var err error
+	fmt.Printf("admin's cert is %v\n", string(adminCert))
+
+	if len(adminCert) == 0 {
+		return shim.Error("Invalid assigner role. Empty.")
+	}
+
+	stub.PutState("admin", adminCert)
+
+	return shim.Success(nil)
+}
+
+func (t *BonusManagementChaincode) issue(stub shim.ChaincodeStubInterface, args []string) pb.Response {
+	fmt.Println("Issue...")
 
 	if len(args) != 3 {
-		return nil, errors.New("Incorrect number of arguments. Expecting 3")
+		return shim.Error("Incorrect number of arguments. Expecting 3")
 	}
-
-	A = args[0]
-	B = args[1]
-
-	// Get the state from the ledger
-	Avalbytes, err := stub.GetState(A)
+	admin, err := stub.GetState("admin")
 	if err != nil {
-		return nil, errors.New("Failed to get state")
+		return shim.Error("Failed to get admin's cert, error: " + err.Error())
 	}
-	if Avalbytes == nil {
-		return nil, errors.New("Entity not found")
-	}
-	Aval, _ = strconv.Atoi(string(Avalbytes))
 
-	Bvalbytes, err := stub.GetState(B)
+	creator, err := stub.GetCreator()
 	if err != nil {
-		return nil, errors.New("Failed to get state")
+		fmt.Println(err.Error())
+		return shim.Error("Failed to get creator's cert, error: " + err.Error())
 	}
-	if Bvalbytes == nil {
-		return nil, errors.New("Entity not found")
+	if bytes.Compare(admin, creator) != 0 {
+		fmt.Printf("admin cert:%x", admin)
+		fmt.Printf("creator cert:%x", creator)
+		return shim.Error("Failed, the cert of creator and caller is not same")
 	}
-	Bval, _ = strconv.Atoi(string(Bvalbytes))
-
-	// Perform the execution
-	X, err = strconv.Atoi(args[2])
-	Aval = Aval - X
-	Bval = Bval + X
-	fmt.Printf("Aval = %d, Bval = %d\n", Aval, Bval)
-
-	// Write the state back to the ledger
-	err = stub.PutState(A, []byte(strconv.Itoa(Aval)))
+	assetName := args[0]
+	organizationCert := args[1]
+	balance, err := strconv.Atoi(args[2])
 	if err != nil {
-		return nil, err
+		return shim.Error("Expecting integer value for asset holding")
+	}
+	oldAsset, err := stub.GetState(assetName)
+	if err != nil {
+		return shim.Error("asset name: " + assetName + "state get error")
+	}
+	if oldAsset != nil {
+		return shim.Error("asset already issue, please try other name")
 	}
 
-	err = stub.PutState(B, []byte(strconv.Itoa(Bval)))
+	asset := &assetIssue{organizationCert, balance, assetName}
+	assetJSONasBytes, err := json.Marshal(asset)
 	if err != nil {
-		return nil, err
+		return shim.Error(err.Error())
 	}
-	//Event based
-	b, err := stub.GetState(EVENT_COUNTER)
+	fmt.Printf("Issue... asset name: %s, detail: %s!", assetName, string(assetJSONasBytes))
+	err = stub.PutState(assetName, assetJSONasBytes)
 	if err != nil {
-		return nil, errors.New("Failed to get state")
-	}
-	noevts, _ := strconv.Atoi(string(b))
-
-	tosend := "Event Counter is " + string(b)
-
-	err = stub.PutState(EVENT_COUNTER, []byte(strconv.Itoa(noevts+1)))
-	if err != nil {
-		return nil, err
+		return shim.Error(err.Error())
 	}
 
-	err = stub.SetEvent("evtsender", []byte(tosend))
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
+	fmt.Println("Issue...done!")
+
+	return shim.Success(nil)
 }
 
-// Deletes an entity from state
-func (t *SimpleChaincode) delete(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
-	if len(args) != 1 {
-		return nil, errors.New("Incorrect number of arguments. Expecting 1")
+func (t *BonusManagementChaincode) assign(stub shim.ChaincodeStubInterface, args []string) pb.Response {
+	fmt.Println("Assign... arg length: %d", len(args))
+
+	if len(args) != 4 {
+		return shim.Error("Incorrect number of arguments. Expecting 4")
 	}
-
-	A := args[0]
-
-	// Delete the key from the state in ledger
-	err := stub.DelState(A)
+	assetName := args[0]
+	assetJSONasBytes, err := stub.GetState(assetName)
 	if err != nil {
-		return nil, errors.New("Failed to delete state")
+		return shim.Error("asset state get failed, have not issued")
+	}
+	if assetJSONasBytes == nil {
+		return shim.Error("asset have not issued")
 	}
 
-	return nil, nil
+	var assetJSON assetIssue
+	err = json.Unmarshal(assetJSONasBytes, &assetJSON)
+	fmt.Println("asset json string:", assetJSONasBytes)
+	if err != nil {
+		return shim.Error("Error Failed to decode JSON of: " + assetName + " resason " + err.Error() + " json:" + string(assetJSONasBytes))
+	}
+	organizationCert := []byte(assetJSON.Owner)
+	serializedID, err := stub.GetCreator()
+	if err != nil {
+		return shim.Error("can not get creator, error:" + err.Error())
+	}
+
+	sid := &SerializedIdentity{}
+	err = proto.Unmarshal(serializedID, sid)
+	creator := sid.IdBytes
+
+	fmt.Println("admin cert length, %d", len(organizationCert))
+	fmt.Println("creator cert length, %d", len(creator))
+
+	fmt.Println("admin cert:%x", organizationCert)
+	fmt.Println("creator cert:x", creator)
+
+	if bytes.Compare(organizationCert, creator) != 0 {
+		return shim.Error("the caller is not the asset's owner")
+	}
+	user := args[1]
+	amount, err := strconv.Atoi(args[2])
+	if err != nil {
+		return shim.Error("amount argument is incorrect")
+	}
+	if amount < 0  {
+		return shim.Error("the amount must not negative")
+	}
+	if  amount > assetJSON.Balance {
+		return shim.Error("the issue balance is small than assign amount")
+	}
+	expire, err := strconv.Atoi(args[3])
+	if err != nil {
+		return shim.Error("expire argument is incorrect")
+	}
+
+	assetJSON.Balance -= amount
+	key := assetName + user
+	var userAssets []UserAsset
+	userAssetString, err := stub.GetState(key)
+	if err != nil || userAssetString == nil {
+		userAssets = []UserAsset{UserAsset{expire, amount}}
+	} else {
+		err = json.Unmarshal(userAssetString, &userAssets)
+		if err != nil {
+			return shim.Error("unmarshal user balance failed " + err.Error())
+		}
+		var find = false
+		var index = 0
+		for i, userAsset := range userAssets {
+			if userAsset.Expire == expire {
+				userAssets[i].Amount += amount
+				find = true
+				break
+			}
+			if userAsset.Expire < expire {
+				index = i + 1
+			}
+		}
+		if !find {
+			asset := UserAsset{expire, amount}
+			userAssets = append(userAssets[:index], append([]UserAsset{asset}, userAssets[index:]...)...)
+		}
+	}
+	userAssetResult, err := json.Marshal(userAssets)
+	if err != nil {
+		return shim.Error("marshal user's asset failed")
+	}
+
+	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
+	err = stub.PutState(key, userAssetResult)
+	if err != nil {
+		return shim.Error("store user's asset failed")
+	}
+
+	return shim.Success(nil)
 }
 
-// Query callback representing the query of a chaincode
-func (t *SimpleChaincode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	if function != "query" {
-		return nil, errors.New("Invalid query function name. Expecting \"query\"")
+func calculateTransferArray(userAssets []UserAsset, expire, amount int) ([]UserAsset, []UserAsset, error) {
+	var startIndex = 0
+	var index = 0
+	var remainAmount = amount
+	var lastAmount = 0
+	for i, sourceAsset := range userAssets {
+		fmt.Printf("expire: %d, balance: %d, target expire: %d\n", sourceAsset.Expire, sourceAsset.Amount, expire)
+		if sourceAsset.Expire < expire {
+			startIndex = i + 1
+			index = startIndex
+		} else if sourceAsset.Expire >= expire {
+			if sourceAsset.Amount <= remainAmount {
+				remainAmount -= sourceAsset.Amount
+				index = i + 1
+			} else {
+				fmt.Printf("remain amount: %d\n", remainAmount)
+				lastAmount = remainAmount
+				remainAmount = 0
+				break
+			}
+		}
 	}
-	var A string // Entities
+	if remainAmount > 0 {
+		return nil, nil, errors.New("balance is less then transfer amount")
+	}
+	var startArray = make([]UserAsset, 0)
+	if startIndex > 0 {
+		startArray = userAssets[:startIndex]
+	}
+	transferArray := userAssets[startIndex:index]
+	fmt.Printf("start index: %d\n", startIndex)
+	remainArray := userAssets[index:]
+	fmt.Printf("last amount: %d\n", lastAmount)
+	dest := make([]UserAsset, len(transferArray));
+	copy(dest, transferArray);
+	if lastAmount > 0 {
+		remainArray[0].Amount -= lastAmount
+		asset := UserAsset{remainArray[0].Expire, lastAmount}
+		dest = append(dest, asset)
+	}
+	for _, asset := range dest {
+		fmt.Printf("11transfer array asset: %d, %d\n", asset.Expire, asset.Amount)
+	}
+	remainArray = append(startArray, remainArray...)
+	for _, asset := range dest {
+		fmt.Printf("22transfer array asset: %d, %d\n", asset.Expire, asset.Amount)
+	}
+
+	return remainArray, dest, nil
+}
+
+func calculateInsert(userAssets []UserAsset, inserts []UserAsset) ([]UserAsset, error) {
+	dest := make([]UserAsset, len(userAssets));
+	copy(dest, userAssets);
+	var index = 0
+	for _, insert := range inserts {
+		fmt.Println("1111")
+		inserted := false
+		for j, targetAsset := range dest[index:] {
+			fmt.Println("1111")
+			if insert.Expire == targetAsset.Expire {
+				fmt.Printf("target asset balance: %d,  amount: %d, index: %d, j: %d, last amout: %d\n",
+					targetAsset.Amount, insert.Amount, index, j, dest[index + j].Amount)
+				dest[index + j].Amount += insert.Amount
+				index = j + 1
+				inserted = true
+				break
+			} else if insert.Expire < targetAsset.Expire {
+				asset := UserAsset{insert.Expire, insert.Amount}
+				startIndex := index + j
+				fmt.Printf("start index: %d\n", startIndex)
+				dest = append(dest[:startIndex], append([]UserAsset{asset}, dest[startIndex:]...)...)
+				index = startIndex + 1
+				inserted = true
+				break
+			}
+		}
+		if !inserted {
+			asset := UserAsset{insert.Expire, insert.Amount}
+			dest = append(dest, asset)
+			index = len(dest)
+		}
+	}
+
+	return dest, nil
+}
+
+func (t *BonusManagementChaincode) transfer(stub shim.ChaincodeStubInterface, args []string) pb.Response {
+	fmt.Println("Transfer...")
+
+	if len(args) != 4 {
+		return shim.Error("Incorrect number of arguments. Expecting 4")
+	}
+
+	serializedID, err := stub.GetCreator()
+	sid := &SerializedIdentity{}
+	err = proto.Unmarshal(serializedID, sid)
+	owner := sid.IdBytes
+
+
+	if err != nil {
+		return shim.Error("Failed decodinf owner")
+	}
+	assetName := args[0]
+	ownerKey := assetName + string(owner)
+
+	targetUser := args[1]
+
+	amount, err := strconv.Atoi(args[2])
+	if err != nil {
+		return shim.Error("amount argument is incorrect")
+	}
+	if amount < 0  {
+		return shim.Error("the amount must not negative")
+	}
+	lastExpire, err := strconv.Atoi(args[3])
+	if err != nil {
+		return shim.Error("last expire argument is incorrect")
+	}
+	if lastExpire < 0  {
+		return shim.Error("the last expire must not negative")
+	}
+
+	fmt.Println("get asset for key: %s", ownerKey)
+	// Verify ownership
+	userAssetString, err := stub.GetState(ownerKey)
+	if err != nil || userAssetString == nil {
+		return shim.Error("the user did not have the asset:" + assetName)
+	}
+
+	var userAssets []UserAsset
+	err = json.Unmarshal(userAssetString, &userAssets)
+	if err != nil {
+		return shim.Error("Failed decod inf owner")
+	}
+	remainArray, transferArray, err := calculateTransferArray(userAssets, lastExpire, amount)
+	if err != nil {
+		return shim.Error("calculate transfer error:" + err.Error())
+	}
+	targetKey := assetName + targetUser
+	var targetUserAsset []UserAsset
+	targetUserAssetString, err := stub.GetState(targetKey)
+	if err != nil || targetUserAssetString ==  nil {
+		targetUserAsset = transferArray
+	} else {
+		var targetUserAssets []UserAsset
+		err := json.Unmarshal(targetUserAssetString, &targetUserAssets)
+		if err != nil {
+			return shim.Error("Failed decodinf owner")
+		}
+		targetUserAsset, err = calculateInsert(targetUserAssets, transferArray)
+	}
+
+	if err != nil {
+		return shim.Error("store user's asset failed")
+	}
+
+	targetUserAssetResult, err := json.Marshal(targetUserAsset)
+	if err != nil {
+		return shim.Error("marshal target user's asset failed")
+	}
+	err = stub.PutState(targetKey, targetUserAssetResult)
+	if err != nil {
+		return shim.Error("store target user's asset failed")
+	}
+
+	userAssetResult, err := json.Marshal(remainArray)
+	if err != nil {
+		return shim.Error("marshal user's asset failed")
+	}
+	err = stub.PutState(ownerKey, userAssetResult)
+	if err != nil {
+		return shim.Error("store target user's asset failed")
+	}
+
+	fmt.Println("Transfer...done")
+
+	return shim.Success(nil)
+}
+
+func (t *BonusManagementChaincode) transferWithDetail(stub shim.ChaincodeStubInterface, args []string) pb.Response {
+	fmt.Println("Transfer...")
+
+	if len(args) != 3 {
+		return shim.Error("Incorrect number of arguments. Expecting 4")
+	}
+
+	serializedID, err := stub.GetCreator()
+	sid := &SerializedIdentity{}
+	err = proto.Unmarshal(serializedID, sid)
+	owner := sid.IdBytes
+	if err != nil {
+		return shim.Error("Failed decodinf owner")
+	}
+	assetName := args[0]
+	ownerKey := assetName + string(owner)
+
+	targetUser := args[1]
+
+	var details []UserAsset
+	fmt.Println("receive josn: %s", args[2])
+	err = json.Unmarshal([]byte(args[2]), &details)
+	if err != nil {
+		return shim.Error("Failed decod transfer detail")
+	}
+
+	fmt.Println("get asset for key: %s", ownerKey)
+	// Verify ownership
+	userAssetString, err := stub.GetState(ownerKey)
+	if err != nil || userAssetString == nil {
+		return shim.Error("the user did not have the asset:" + assetName)
+	}
+	var userAssets []UserAsset
+	err = json.Unmarshal(userAssetString, &userAssets)
+	if err != nil {
+		return shim.Error("Failed decod inf owner")
+	}
+
+	targetKey := assetName + targetUser
+	var targetUserAssets []UserAsset
+	targetUserAssetString, err := stub.GetState(targetKey)
+	if err == nil && targetUserAssetString !=  nil {
+		err = json.Unmarshal(targetUserAssetString, &targetUserAssets)
+		if err != nil {
+			return shim.Error("Failed decod target's asset detail:" + err.Error())
+		}
+	}
+
+	remainArray := userAssets
+	var transferArray []UserAsset
+	for _, detail := range details {
+		fmt.Println("1111")
+		remainArray, transferArray, err = calculateTransferArray(remainArray, detail.Expire, detail.Amount)
+		if err != nil {
+			return shim.Error("calculate transfer array failed: " + err.Error())
+		}
+		if targetUserAssets ==  nil {
+			targetUserAssets = transferArray
+		} else {
+			targetUserAssets, err = calculateInsert(targetUserAssets, transferArray)
+		}
+	}
+	targetUserAssetJson, err := json.Marshal(targetUserAssets)
+	if err != nil {
+		return shim.Error("marshal target user's asset failed")
+	}
+	err = stub.PutState(targetKey, targetUserAssetJson)
+	if err != nil {
+		return shim.Error("store target user's asset failed")
+	}
+
+	userAssetResult, err := json.Marshal(remainArray)
+	if err != nil {
+		return shim.Error("marshal user's asset failed")
+	}
+	err = stub.PutState(ownerKey, userAssetResult)
+	if err != nil {
+		return shim.Error("store target user's asset failed")
+	}
+
+	fmt.Println("Transfer...done")
+
+	return shim.Success(nil)
+}
+// Invoke will be called for every transaction.
+// Supported functions are the following:
+// "assign(asset, owner)": to assign ownership of assets. An asset can be owned by a single entity.
+// Only an administrator can call this function.
+// "transfer(asset, newOwner)": to transfer the ownership of an asset. Only the owner of the specific
+// asset can call this function.
+// An asset is any string to identify it. An owner is representated by one of his ECert/TCert.
+func (t *BonusManagementChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
+	function, args := stub.GetFunctionAndParameters()
+
+	// Handle different functions
+	if function == "issue" {
+		// Assign ownership
+		return t.issue(stub, args)
+	} else if function == "assign" {
+		// Assign ownership
+		return t.assign(stub, args)
+	} else if function == "transfer" {
+		// Transfer ownership
+		return t.transfer(stub, args)
+	} else if function == "transferWithDetail" {
+		// Transfer ownership
+		return t.transferWithDetail(stub, args)
+	}else if function == "query" {
+		// Query owner
+		return t.query(stub, "user", args)
+	} else if function == "queryOrg" {
+		// Query owner
+		return t.query(stub, "organization", args)
+	}
+	//return nil, nil
+	return shim.Error("Received unknown function invocation:" + function)
+}
+
+func (t *BonusManagementChaincode) queryUserBalance(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	var err error
 
-	if len(args) != 1 {
-		return nil, errors.New("Incorrect number of arguments. Expecting name of the person to query")
+	if len(args) != 2 {
+		fmt.Println("Incorrect number of arguments. Expecting name of an asset to query")
+		return shim.Error("Incorrect number of arguments. Expecting name of an asset to query")
 	}
 
-	A = args[0]
+	// Who is the owner of the asset?
 
-	// Get the state from the ledger
-	Avalbytes, err := stub.GetState(A)
+	owner := args[0]
 	if err != nil {
-		jsonResp := "{\"Error\":\"Failed to get state for " + A + "\"}"
-		return nil, errors.New(jsonResp)
+		return shim.Error("Failed decoding owner")
 	}
 
-	if Avalbytes == nil {
-		jsonResp := "{\"Error\":\"Nil amount for " + A + "\"}"
-		return nil, errors.New(jsonResp)
-	}
+	assetName := args[1]
+	fmt.Printf("Arg [%s]\n", assetName)
+	ownerKey := assetName + owner
+	userAssetString, err := stub.GetState(ownerKey)
+	return shim.Success(userAssetString)
+}
 
-	jsonResp := "{\"Name\":\"" + A + "\",\"Amount\":\"" + string(Avalbytes) + "\"}"
-	fmt.Printf("Query Response:%s\n", jsonResp)
-	return Avalbytes, nil
+func (t *BonusManagementChaincode) queryOrganizationBalance(stub shim.ChaincodeStubInterface, args []string) pb.Response {
+	assetName := args[0]
+	userAssetString, err := stub.GetState(assetName)
+	if err != nil {
+		return shim.Error("Failed decoding owner")
+	}
+	fmt.Printf("query... asset name: %s, detail: %s!", assetName, string(userAssetString))
+	return shim.Success(userAssetString)
+}
+
+
+// Query callback representing the query of a chaincode
+// Supported functions are the following:
+// "query(asset)": returns the owner of the asset.
+// Anyone can invoke this function.
+func (t *BonusManagementChaincode) query(stub shim.ChaincodeStubInterface, function string, args []string) pb.Response {
+	fmt.Printf("Query [%s]", function)
+
+	if function == "user" {
+		return t.queryUserBalance(stub, args)
+	} else if function == "organization" {
+		return t.queryOrganizationBalance(stub, args)
+	} else {
+		return shim.Error("Invalid query function name. Expecting \"query\"")
+
+	}
 }
 
 func main() {
-	err := shim.Start(new(SimpleChaincode))
+	err := shim.Start(new(BonusManagementChaincode))
 	if err != nil {
 		fmt.Printf("Error starting Simple chaincode: %s", err)
 	}
