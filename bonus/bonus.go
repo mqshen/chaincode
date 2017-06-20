@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"bytes"
 	"github.com/golang/protobuf/proto"
+	"encoding/base64"
 )
 
 type assetIssue struct {
@@ -199,6 +200,7 @@ func (t *BonusManagementChaincode) assign(stub shim.ChaincodeStubInterface, args
 	if err != nil || userAssetString == nil {
 		userAssets = []UserAsset{UserAsset{expire, amount}}
 	} else {
+		fmt.Println("set key: %s , detail: %s", base64.URLEncoding.EncodeToString([]byte(user)), string(userAssetString))
 		err = json.Unmarshal(userAssetString, &userAssets)
 		if err != nil {
 			return shim.Error("unmarshal user balance failed " + err.Error())
@@ -225,7 +227,13 @@ func (t *BonusManagementChaincode) assign(stub shim.ChaincodeStubInterface, args
 		return shim.Error("marshal user's asset failed")
 	}
 
-	fmt.Println("set key: %s , detail: %s", key, string(userAssetResult))
+	userBalance := 0
+	for _, userAsset := range userAssets {
+		userBalance += userAsset.Amount
+	}
+
+	fmt.Println("set key: %s , detail: %s", base64.URLEncoding.EncodeToString([]byte(user)), string(userAssetResult))
+	fmt.Println("set key: %s , detail: %d", base64.URLEncoding.EncodeToString([]byte(user)), userBalance)
 	err = stub.PutState(key, userAssetResult)
 	if err != nil {
 		return shim.Error("store user's asset failed")
